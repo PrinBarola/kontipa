@@ -1,0 +1,320 @@
+/* Control heights and styles for admin management headers (bins, janitors)
+	 Scoped to .section-header so it won't affect other pages unintentionally.
+	 Uses high-specificity selectors and a few !important overrides to ensure
+	 consistent sizing across different bootstrap utility classes.
+*/
+
+:root {
+	 --admin-control-height-large: 52px;
+  --admin-control-height-mobile: 44px;
+	--admin-control-radius: 14px;
+}
+
+/* Main large controls used in management headers */
+.section-header .input-group,
+.section-header .dropdown,
+.section-header > .d-flex .btn:not(.period-btn),
+.section-header .btn:not(.period-btn) {
+	height: var(--admin-control-height-large) !important;
+	min-height: var(--admin-control-height-large) !important;
+	display: inline-flex !important;
+	align-items: center !important;
+	border-radius: var(--admin-control-radius) !important;
+}
+
+/* Make the search input visually match the big control: rounded box and inner icon */
+.section-header .input-group {
+	background: #fff;
+	border-radius: var(--admin-control-radius) !important;
+	box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+	overflow: hidden;
+	padding: 6px; /* small internal padding so input sits nicely */
+}
+
+.section-header .input-group .input-group-text,
+.section-header .input-group .form-control {
+	height: calc(var(--admin-control-height-large) - 12px) !important; /* account for .input-group padding */
+	min-height: calc(var(--admin-control-height-large) - 12px) !important;
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	align-items: center !important;
+}
+
+.section-header .input-group .form-control {
+	padding-left: 1rem !important;
+	font-size: 1.05rem;
+}
+
+/* Filter dropdown - keep as pill but match height */
+.section-header .dropdown .btn:not(.period-btn) {
+	border-radius: var(--admin-control-radius) !important;
+	padding: 0 1rem !important;
+	box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+	background: #fff;
+	border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* Add New button - make it look like the green rounded block in screenshot */
+.section-header > .d-flex .btn.btn-primary:not(.period-btn),
+.section-header .btn.btn-primary:not(.period-btn) {
+	background: linear-gradient(135deg,#00b87c,#009961) !important;
+	color: #fff !important;
+	padding: 0 1.25rem !important;
+	border: none !important;
+	box-shadow: 0 20px 50px rgba(0,153,97,0.16) !important;
+	font-size: 0.9rem !important; /* smaller Add button text */
+	line-height: 1 !important;
+	display: inline-flex !important;
+	justify-content: center !important;
+	align-items: center !important;
+}
+
+.section-header > .d-flex .btn.btn-primary:not(.period-btn) i,
+.section-header .btn.btn-primary:not(.period-btn) i {
+	font-size: 1rem !important; /* keep icon legible */
+	margin-bottom: 6px !important; /* space between icon and text on stacked layout */
+}
+
+/* Ensure small screen size is comfortable */
+@media (max-width: 767px) {
+	.section-header .input-group,
+	.section-header .dropdown,
+	.section-header > .d-flex .btn:not(.period-btn),
+	.section-header .btn:not(.period-btn) {
+		height: var(--admin-control-height-mobile) !important;
+		min-height: var(--admin-control-height-mobile) !important;
+	}
+
+	.section-header .input-group .input-group-text,
+	.section-header .input-group .form-control {
+		height: calc(var(--admin-control-height-mobile) - 12px) !important;
+		min-height: calc(var(--admin-control-height-mobile) - 12px) !important;
+	}
+}
+
+/* Slight spacing fix when controls are stacked */
+.section-header .d-flex { gap: 0.75rem !important; }
+
+/* Make sure dropdown-menu aligns visually when button is large */
+.section-header .dropdown .dropdown-menu { transform-origin: top right !important; }
+
+/* Scroll Progress Bar */
+.scroll-progress-container {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 4px !important;
+  background: rgba(0, 0, 0, 0.1) !important;
+  z-index: 9999 !important;
+}
+
+.scroll-progress-bar {
+  height: 100% !important;
+  background: linear-gradient(90deg, #10b981, #059669, #34d399) !important;
+  width: 0% !important;
+  transition: width 0.15s ease-out !important;
+  border-radius: 0 2px 2px 0 !important;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4) !important;
+  background-size: 200% auto !important;
+  animation: gradientShift 3s linear infinite !important;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Section Headers and Descriptions - Consistent typography */
+/* Variables for consistent text styling */
+:root {
+  --heading-font: 'Inter', 'Segoe UI', sans-serif;
+  --text-dark: #1a202c;
+  --text-muted: #6c757d;
+  --icon-flip-duration: 0.6s;
+}
+
+/* Icon Flip Animation for Sidebar and Action Buttons */
+.sidebar-item i,
+.action-buttons .btn i,
+.btn i,
+.nav-link i,
+.stat-icon i,
+.notification-item i,
+.dropdown-item i {
+  transition: transform var(--icon-flip-duration) cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transform-style: preserve-3d !important;
+  perspective: 1000px !important;
+  will-change: transform !important;
+  backface-visibility: hidden !important;
+}
+
+.sidebar-item:hover i,
+.action-buttons .btn:hover i,
+.btn:hover i,
+.nav-link:hover i,
+.stat-card:hover .stat-icon i,
+.notification-item:hover i,
+.dropdown-item:hover i {
+  transform: rotateY(360deg) !important;
+}
+
+/* Special animation for stat cards and notification items */
+.stat-icon i,
+.notification-item i {
+  transition: transform var(--icon-flip-duration) ease !important;
+  transform-style: preserve-3d !important;
+  perspective: 1000px !important;
+  will-change: transform !important;
+}
+
+.stat-card:hover .stat-icon i,
+.notification-item:hover i {
+  transform: rotateY(360deg) !important;
+}
+
+/* Smooth animation for dropdown icons */
+.dropdown-item i {
+  transition: transform var(--icon-flip-duration) ease !important;
+  transform-style: preserve-3d !important;
+  will-change: transform !important;
+}
+
+.dropdown-item:hover i {
+  transform: rotateY(360deg) !important;
+}
+
+/* View All Link Style */
+.view-all-link {
+  color: var(--text-dark) !important;
+  text-decoration: none !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  transition: all 0.3s ease !important;
+}
+
+.view-all-link span {
+  position: relative !important;
+}
+
+.view-all-link span::after {
+  content: '' !important;
+  position: absolute !important;
+  width: 100% !important;
+  height: 2px !important;
+  bottom: -2px !important;
+  left: 0 !important;
+  background-color: var(--primary-color) !important;
+  transform: scaleX(0) !important;
+  transform-origin: right !important;
+  transition: transform 0.3s ease !important;
+}
+
+.view-all-link:hover {
+  color: var(--primary-color) !important;
+}
+
+.view-all-link:hover span::after {
+  transform: scaleX(1) !important;
+  transform-origin: left !important;
+}
+
+.view-all-link:hover i {
+  transform: translateX(4px) !important;
+}
+
+.view-all-link i {
+  transition: transform 0.3s ease !important;
+  font-size: 0.8rem !important;
+}
+
+/* Page Titles - Main headings for each admin page */
+.page-title {
+  font-size: 2.5rem !important;
+  font-weight: 700 !important;
+  color: var(--text-dark) !important;
+  margin-bottom: 0.5rem !important;
+  letter-spacing: -0.5px !important;
+  line-height: 1.2 !important;
+  font-family: var(--heading-font) !important;
+}
+
+/* Page Subtitles - Descriptive text under main headings */
+.page-subtitle {
+  font-size: 1rem !important;
+  font-weight: 400 !important;
+  color: var(--text-muted) !important;
+  margin: 0 !important;
+  line-height: 1.6 !important;
+  letter-spacing: -0.25px !important;
+  font-family: var(--heading-font) !important;
+  max-width: 600px !important;
+}
+
+/* Section Headers - For sub-sections within pages */
+.section-title {
+  font-size: 1.35rem !important;
+  font-weight: 600 !important;
+  color: var(--text-dark) !important;
+  margin-bottom: 0.4rem !important;
+  letter-spacing: -0.25px !important;
+  line-height: 1.3 !important;
+  font-family: var(--heading-font) !important;
+}
+
+/* Section Descriptions - Descriptive text under section headers */
+.section-description {
+  font-size: 0.9rem !important;
+  font-weight: 400 !important;
+  color: var(--text-muted) !important;
+  margin-bottom: 1.25rem !important;
+  line-height: 1.5 !important;
+  font-family: var(--heading-font) !important;
+  max-width: 500px !important;
+}
+
+/* Tables - Softer border radius */
+.card .table {
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.card .table thead th:first-child {
+  border-top-left-radius: 8px;
+}
+
+.card .table thead th:last-child {
+  border-top-right-radius: 8px;
+}
+
+.card .table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 8px;
+}
+
+.card .table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 8px;
+}/* Tables - Softer border radius */
+.card .table {
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.card .table thead th:first-child {
+  border-top-left-radius: 10px;
+}
+
+.card .table thead th:last-child {
+  border-top-right-radius: 10px;
+}
+
+.card .table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 10px;
+}
+
+.card .table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 10px;
+}

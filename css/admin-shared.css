@@ -1,0 +1,179 @@
+/* Shared Admin Dashboard Styles */
+:root {
+  --transition-base: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-hover: 0 15px 30px rgba(0, 0, 0, 0.15);
+}
+
+/* Consistent Hover Effects */
+.card,
+.stat-card,
+.notification-item,
+.sidebar-item,
+.btn,
+.nav-link {
+  transition: var(--transition-base) !important;
+}
+
+.card:hover,
+.stat-card:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: var(--shadow-hover) !important;
+}
+
+.notification-item:hover,
+.sidebar-item:hover {
+  transform: translateX(4px) !important;
+}
+
+.btn:hover,
+.nav-link:hover {
+  transform: translateY(-2px) !important;
+}
+
+/* Smooth Table Interactions */
+.table tbody tr {
+  transition: var(--transition-base) !important;
+}
+
+.table tbody tr:hover {
+  background-color: rgba(16, 185, 129, 0.04) !important;
+  transform: scale(1.01) !important;
+}
+
+/* Badge Animations */
+.badge {
+  transition: var(--transition-base) !important;
+}
+
+.badge:hover {
+  transform: scale(1.1) !important;
+}
+
+/* Form Control Animations */
+.form-control,
+.form-select {
+  transition: var(--transition-base) !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
+}
+
+/* Button Loading State */
+.btn-loading {
+  position: relative !important;
+  pointer-events: none !important;
+}
+
+.btn-loading::after {
+  content: "" !important;
+  position: absolute !important;
+  width: 16px !important;
+  height: 16px !important;
+  top: 50% !important;
+  left: 50% !important;
+  margin: -8px 0 0 -8px !important;
+  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+  border-top-color: #fff !important;
+  border-radius: 50% !important;
+  animation: spin 0.8s linear infinite !important;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Dropdown Animations */
+.dropdown-menu {
+  animation: dropdownFade 0.2s ease-out !important;
+}
+
+@keyframes dropdownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Modal Animations */
+.modal.fade .modal-dialog {
+  transition: var(--transition-smooth) !important;
+  transform: scale(0.95) translateY(-20px) !important;
+}
+
+.modal.show .modal-dialog {
+  transform: scale(1) translateY(0) !important;
+}
+
+/* Toast Notifications */
+.toast {
+  animation: toastSlide 0.3s ease-out !important;
+}
+
+@keyframes toastSlide {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Page Transitions */
+.content-section {
+  animation: fadeInUp 0.5s ease-out !important;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading Skeleton Animation */
+.skeleton-loading {
+  position: relative !important;
+  overflow: hidden !important;
+  background: #e2e8f0 !important;
+}
+
+.skeleton-loading::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  transform: translateX(-100%) !important;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0.2) 20%,
+    rgba(255, 255, 255, 0.5) 60%,
+    rgba(255, 255, 255, 0)
+  ) !important;
+  animation: shimmer 2s infinite !important;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
