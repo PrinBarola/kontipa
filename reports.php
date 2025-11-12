@@ -36,13 +36,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     // Map incoming form fields to your DB schema
     $report_name = trim($_POST['name'] ?? '');
     $report_type = trim($_POST['type'] ?? '');
-    $date_from   = trim($_POST['from_date'] ?? '') ?: null; // expected format YYYY-MM-DD
+    $date_from   = trim($_POST['from_date'] ?? '') ?: null;
     $date_to     = trim($_POST['to_date'] ?? '') ?: null;
     $description = trim($_POST['description'] ?? '') ?: null;
-    $format      = trim($_POST['format'] ?? 'pdf'); // pdf|excel|csv
-    $generated_by = getCurrentUserId() ?: null; // MUST be existing admins.admin_id
-    $initial_status = 'generating'; // temporary status until we set completed/failed
-    $file_path    = null; // will be set after generation
+    // Normalize format: treat any 'pdf' requests as excel (we generate CSV that Excel can open)
+    $format = strtolower(trim($_POST['format'] ?? 'excel')); // expected: 'excel' or 'csv'
+    if ($format === 'pdf') $format = 'excel';
+     $generated_by = getCurrentUserId() ?: null;
+     $initial_status = 'generating'; // temporary status until we set completed/failed
+     $file_path    = null; // will be set after generation
 
     if ($report_name === '' || $report_type === '') {
         echo json_encode(['success' => false, 'message' => 'Report name and type are required.']);
@@ -89,25 +91,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             mkdir($generatedDirAbs, 0755, true);
         }
 
-        // File extension mapping
+        // Always save Excel/CSV formats as .csv so Excel can open them.
         $ext = 'csv';
-        if ($format === 'pdf') $ext = 'pdf'; // here we will put text contents with .pdf extension (replace with real pdf gen)
-        if ($format === 'excel') $ext = 'csv'; // simple excel-compatible CSV; replace with xlsx generator if needed
         $filename = "report_{$reportId}." . $ext;
         $absPath = $generatedDirAbs . '/' . $filename;
         $relPath = $generatedDirRel . '/' . $filename; // stored in DB
 
-        // Example content (header + metadata). Replace with proper report content.
-        $contentLines = [];
-        $contentLines[] = "Report ID,Report Name,Report Type,Requested By,Date From,Date To,Created At";
-        $contentLines[] = "{$reportId},\"{$report_name}\",{$report_type},{$generated_by}," . ($date_from ?: '-') . "," . ($date_to ?: '-') . "," . date('Y-m-d H:i:s');
-        if ($description) {
-            $contentLines[] = "";
-            $contentLines[] = "Description:";
-            $contentLines[] = str_replace(["\r\n","\n","\r"], ' ', $description);
+        // Build CSV content (used for format 'excel' and any normalized 'pdf' requests)
+        $rows = [];
+        $rows[] = ['Report ID','Report Name','Report Type','Requested By','Date From','Date To','Created At'];
+        $rows[] = [
+            $reportId,
+            $report_name,
+            $report_type,
+            $generated_by ?? '',
+            $date_from ?: '-',
+            $date_to ?: '-',
+            date('Y-m-d H:i:s')
+        ];
+        if (!empty($description)) {
+            $rows[] = [];
+            $rows[] = ['Description', preg_replace("/[\r\n]+/", " ", $description)];
         }
-        $fileContent = implode("\n", $contentLines);
-
+        $quoteField = function($val) {
+            $s = (string)$val;
+            $s = str_replace('"', '""', $s);
+            return '"' . $s . '"';
+        };
+        $csvLines = [];
+        foreach ($rows as $r) {
+            if (!is_array($r) || count($r) === 0) { $csvLines[] = ''; continue; }
+            $quoted = array_map($quoteField, $r);
+            $csvLines[] = implode(',', $quoted);
+        }
+        $csvBody = implode("\r\n", $csvLines) . "\r\n";
+        $BOM = "\xEF\xBB\xBF";
+        $fileContent = $BOM . $csvBody;
+ 
         // Write file
         $written = file_put_contents($absPath, $fileContent);
         if ($written === false) {
@@ -267,6 +287,20 @@ if ($DEBUG) {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="css/bootstrap.min.css">
   <link rel="stylesheet" href="css/janitor-dashboard.css">
+  <style>
+    /* Stronger rule so the Recent Reports title remains green even if other styles override it */
+    .card-header .recent-reports-title,
+    .card-header .recent-reports-title * {
+      color: #198754 !important; /* bootstrap success green */
+    }
+    /* In case the title is wrapped in a link or button, ensure no background/box-shadow hides the text */
+    .card-header .recent-reports-title a,
+    .card-header .recent-reports-title .btn {
+      color: #198754 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+  </style>
 </head>
 <body>
   <div id="scrollProgress" class="scroll-progress"></div>
@@ -367,7 +401,7 @@ if ($DEBUG) {
       <!-- Recent Reports -->
       <div class="card">
         <div class="card-header">
-          <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>Recent Reports</h5>
+          <h5 class="mb-0 recent-reports-title"><i class="fas fa-file-alt me-2"></i>Recent Reports</h5>
         </div>
         <div class="card-body p-0">
           <div class="table-responsive">
@@ -491,207 +525,186 @@ if ($DEBUG) {
   <script src="js/reports.js"></script>
 
   <script>
-    function createReportCardHtml(report) {
-      const createdAt = report.created_at ? new Date(report.created_at).toLocaleString() : '';
-      const status = (report.status || 'generating').toLowerCase();
-      let statusClass = 'badge bg-secondary';
-      if (status === 'completed') statusClass = 'badge bg-success';
-      if (status === 'generating' || status === 'pending') statusClass = 'badge bg-warning text-dark';
-      if (status === 'failed') statusClass = 'badge bg-danger';
-      const desc = report.description ? `<div class="small text-muted mt-1">${escapeHtml(report.description.length > 120 ? report.description.substring(0,120) + '...' : report.description)}</div>` : '';
+/* Replace broken script below with a clean implementation that:
+   - Renders report cards and table rows
+   - Submits create_report via fetch (FormData)
+   - Uses download-report.php?id=... for downloads (server will stream CSV)
+   - Keeps the Export button behavior
+*/
+(function(){
+  function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;')
+      .replaceAll("'", '&#039;');
+  }
 
-      return `
-        <div class="col-12 col-md-4" id="report-card-${report.report_id}">
-          <div class="card h-100">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title mb-2">${escapeHtml(report.name)}</h5>
-              <p class="mb-1"><strong>Type:</strong> ${escapeHtml(report.type)}</p>
-              <p class="text-muted small mb-2">${escapeHtml(createdAt)}</p>
-              ${desc}
-              <div class="mt-auto d-flex justify-content-between align-items-center">
-                <span class="${statusClass}">${escapeHtml(report.status || 'generating')}</span>
-                <div>
-                  <a href="view-report.php?id=${report.report_id}" class="btn btn-sm btn-outline-primary">View</a>
-                  <a href="download-report.php?id=${report.report_id}" class="btn btn-sm btn-outline-secondary">Download</a>
-                </div>
+  function createReportCardHtml(report) {
+    const createdAt = report.created_at ? new Date(report.created_at).toLocaleString() : '';
+    const status = (report.status || 'generating').toLowerCase();
+    let statusClass = 'badge bg-secondary';
+    if (status === 'completed') statusClass = 'badge bg-success';
+    if (status === 'generating' || status === 'pending') statusClass = 'badge bg-warning text-dark';
+    if (status === 'failed') statusClass = 'badge bg-danger';
+    const desc = report.description ? `<div class="small text-muted mt-1">${esc(report.description.length>120? report.description.substring(0,120)+'...': report.description)}</div>` : '';
+
+    const downloadHref = 'download-report.php?id=' + encodeURIComponent(report.report_id);
+    return `
+      <div class="col-12 col-md-4" id="report-card-${report.report_id}">
+        <div class="card h-100">
+          <div class="card-body d-flex flex-column">
+            <h5 class="card-title mb-2">${esc(report.name)}</h5>
+            <p class="mb-1"><strong>Type:</strong> ${esc(report.type)}</p>
+            <p class="text-muted small mb-2">${esc(createdAt)}</p>
+            ${desc}
+            <div class="mt-auto d-flex justify-content-between align-items-center">
+              <span class="${statusClass}">${esc(report.status || 'generating')}</span>
+              <div>
+                <a href="view-report.php?id=${report.report_id}" class="btn btn-sm btn-outline-primary">View</a>
+                <a href="${downloadHref}" class="btn btn-sm btn-outline-secondary">Download</a>
               </div>
             </div>
           </div>
         </div>
-      `;
-    }
+      </div>
+    `;
+  }
 
-    function escapeHtml(s) {
-      if (!s) return '';
-      return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;');
-    }
+  function insertReportTableRow(report) {
+    const tbody = document.getElementById('reportsTableBody');
+    if (!tbody) return;
+    // remove "no reports" row if present
+    if (tbody.firstElementChild && tbody.firstElementChild.querySelector('.text-center')) tbody.innerHTML = '';
 
-    function generateReport() {
-      const nameEl = document.getElementById('reportName');
-      const typeEl = document.getElementById('reportType');
-      const fromEl = document.getElementById('reportFromDate');
-      const toEl = document.getElementById('reportToDate');
-      const descEl = document.getElementById('reportDescription');
-      const formatEl = document.getElementById('reportFormat');
+    const createdFmt = report.created_at ? new Date(report.created_at).toLocaleString() : '-';
+    const downloadHref = 'download-report.php?id=' + encodeURIComponent(report.report_id);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(report.name)}</td>
+      <td class="d-none d-md-table-cell">${esc(report.description || '-')}</td>
+      <td class="d-none d-md-table-cell">${esc(report.type)}</td>
+      <td class="d-none d-lg-table-cell">${esc(createdFmt)}</td>
+      <td><span class="badge bg-warning text-dark">${esc(report.status)}</span></td>
+      <td class="text-end">
+        <div class="btn-group" role="group" aria-label="Actions">
+          <a href="view-report.php?id=${report.report_id}" class="btn btn-sm btn-outline-primary">View</a>
+          <a href="${downloadHref}" class="btn btn-sm btn-outline-secondary">Download</a>
+        </div>
+      </td>
+    `;
+    tbody.prepend(tr);
+  }
 
-      const name = nameEl ? nameEl.value.trim() : '';
-      const type = typeEl ? typeEl.value : '';
-      const fromDate = fromEl ? fromEl.value : '';
-      const toDate = toEl ? toEl.value : '';
-      const description = descEl ? descEl.value.trim() : '';
-      const format = formatEl ? formatEl.value : 'pdf';
+  // handle create report
+  window.generateReport = async function() {
+    const nameEl = document.getElementById('reportName');
+    const typeEl = document.getElementById('reportType');
+    const fromEl = document.getElementById('reportFromDate');
+    const toEl = document.getElementById('reportToDate');
+    const descEl = document.getElementById('reportDescription');
+    const formatEl = document.getElementById('reportFormat');
 
-      if (!name || !type) {
-        alert('Please enter report name and select type.');
+    const name = nameEl ? nameEl.value.trim() : '';
+    const type = typeEl ? typeEl.value : '';
+    const fromDate = fromEl ? fromEl.value : '';
+    const toDate = toEl ? toEl.value : '';
+    const description = descEl ? descEl.value.trim() : '';
+    const format = formatEl ? formatEl.value : 'excel';
+
+    if (!name || !type) { alert('Please enter report name and select type.'); return; }
+
+    const modalEl = document.getElementById('createReportModal');
+    const btn = modalEl ? modalEl.querySelector('.btn-primary') : null;
+    if (btn) { btn.disabled = true; btn.dataset.orig = btn.innerHTML; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Creating...'; }
+
+    try {
+      const fd = new FormData();
+      fd.append('action','create_report');
+      fd.append('name', name);
+      fd.append('type', type);
+      if (fromDate) fd.append('from_date', fromDate);
+      if (toDate) fd.append('to_date', toDate);
+      if (description) fd.append('description', description);
+      fd.append('format', format);
+
+      const res = await fetch('reports.php', { method: 'POST', body: fd, credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Network error');
+      const json = await res.json();
+      if (!json || !json.success) {
+        alert((json && json.message) ? json.message : 'Failed to create report');
         return;
       }
+      const report = json.report;
+      // update UI
+      insertReportTableRow(report);
+      const container = document.getElementById('createdReportsContainer');
+      if (container) container.insertAdjacentHTML('afterbegin', createReportCardHtml(report));
+      const statReports = document.getElementById('stat-reports');
+      if (statReports) statReports.textContent = (parseInt(statReports.textContent||'0',10) + 1).toString();
 
-      const formData = new FormData();
-      formData.append('action', 'create_report');
-      formData.append('name', name);
-      formData.append('type', type);
-      if (fromDate) formData.append('from_date', fromDate);
-      if (toDate) formData.append('to_date', toDate);
-      if (description) formData.append('description', description);
-      if (format) formData.append('format', format);
+      // reset & close modal
+      if (document.getElementById('createReportForm')) document.getElementById('createReportForm').reset();
+      try { bootstrap.Modal.getOrCreateInstance(modalEl).hide(); } catch(e){}
+    } catch (err) {
+      console.error('create report error', err);
+      alert('Failed to create report');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.orig || 'Generate Report'; }
+    }
+  };
 
-      const modalEl = document.getElementById('createReportModal');
-      const btn = modalEl ? modalEl.querySelector('.btn-primary') : null;
-      if (btn) { btn.disabled = true; btn.dataset.orig = btn.innerHTML; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Creating...'; }
+  // Export button behavior (submits to export_reports.php)
+  window.exportReport = function() {
+    const type = document.getElementById('reportType') ? document.getElementById('reportType').value : '';
+    const fromDate = document.getElementById('reportFromDate') ? document.getElementById('reportFromDate').value : '';
+    const toDate = document.getElementById('reportToDate') ? document.getElementById('reportToDate').value : '';
 
-      fetch('reports.php', {
-        method: 'POST',
-        body: formData,
-        credentials: 'same-origin'
-      })
-      .then(r => {
-        if (!r.ok) throw new Error('Network response was not ok');
-        return r.json();
-      })
-      .then(data => {
-        if (!data || !data.success) {
-          alert((data && data.message) ? data.message : 'Failed to create report');
-          console.error(data && data.error ? data.error : null);
-          return;
-        }
-        const report = data.report;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'export_reports.php';
+    form.style.display = 'none';
 
-        const container = document.getElementById('createdReportsContainer');
-        if (container) {
-          container.insertAdjacentHTML('afterbegin', createReportCardHtml(report));
-        }
-        const statReports = document.getElementById('stat-reports');
-        if (statReports) statReports.textContent = (parseInt(statReports.textContent||'0',10) + 1).toString();
-
-        const tbody = document.getElementById('reportsTableBody');
-        if (tbody) {
-          const tr = document.createElement('tr');
-          const createdFmt = report.created_at ? new Date(report.created_at).toLocaleString() : '-';
-          tr.innerHTML = `
-            <td>${escapeHtml(report.name)}</td>
-            <td class="d-none d-md-table-cell">${escapeHtml(report.description || '-')}</td>
-            <td class="d-none d-md-table-cell">${escapeHtml(report.type)}</td>
-            <td class="d-none d-lg-table-cell">${escapeHtml(createdFmt)}</td>
-            <td><span class="badge bg-warning text-dark">${escapeHtml(report.status)}</span></td>
-            <td class="text-end">
-              <div class="btn-group" role="group" aria-label="Actions">
-                <a href="view-report.php?id=${report.report_id}" class="btn btn-sm btn-outline-primary">View</a>
-                <a href="download-report.php?id=${report.report_id}" class="btn btn-sm btn-outline-secondary">Download</a>
-              </div>
-            </td>
-          `;
-          if (tbody.firstElementChild && tbody.firstElementChild.querySelector('.text-center')) {
-            tbody.innerHTML = '';
-          }
-          tbody.prepend(tr);
-        }
-
-        if (document.getElementById('createReportForm')) document.getElementById('createReportForm').reset();
-
-        try {
-          const modalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
-          modalInstance.hide();
-        } catch(e) {
-          if (modalEl) modalEl.classList.remove('show');
-        }
-      })
-      .catch(err => {
-        console.error('create report error', err);
-        alert('Failed to create report');
-      })
-      .finally(() => {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = btn.dataset.orig || 'Generate Report';
-        }
-      });
+    if (type) {
+      const i = document.createElement('input'); i.type='hidden'; i.name='type'; i.value=type; form.appendChild(i);
+    }
+    if (fromDate) {
+      const i = document.createElement('input'); i.type='hidden'; i.name='from_date'; i.value=fromDate; form.appendChild(i);
+    }
+    if (toDate) {
+      const i = document.createElement('input'); i.type='hidden'; i.name='to_date'; i.value=toDate; form.appendChild(i);
     }
 
-    function exportReport() {
-      const type = document.getElementById('reportType') ? document.getElementById('reportType').value : '';
-      const fromDate = document.getElementById('reportFromDate') ? document.getElementById('reportFromDate').value : '';
-      const toDate = document.getElementById('reportToDate') ? document.getElementById('reportToDate').value : '';
+    document.body.appendChild(form);
+    const btn = document.getElementById('btnExport');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Preparing...'; }
+    form.submit();
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-download me-1"></i>Export'; }
+      form.remove();
+    }, 1500);
+  };
 
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = 'export_reports.php';
-      form.style.display = 'none';
-
-      if (type) {
-        const inputType = document.createElement('input');
-        inputType.type = 'hidden';
-        inputType.name = 'type';
-        inputType.value = type;
-        form.appendChild(inputType);
-      }
-
-      if (fromDate) {
-        const inputFrom = document.createElement('input');
-        inputFrom.type = 'hidden';
-        inputFrom.name = 'from_date';
-        inputFrom.value = fromDate;
-        form.appendChild(inputFrom);
-      }
-
-      if (toDate) {
-        const inputTo = document.createElement('input');
-        inputTo.type = 'hidden';
-        inputTo.name = 'to_date';
-        inputTo.value = toDate;
-        form.appendChild(inputTo);
-      }
-
-      document.body.appendChild(form);
-
-      const btn = document.getElementById('btnExport');
-      if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Preparing...';
-      }
-
-      form.submit();
-
-      setTimeout(function() {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fas fa-download me-1"></i>Export';
-        }
-        form.remove();
-      }, 1500);
-    }
+  // expose helpers
+  window.createReportCardHtml = createReportCardHtml;
+  window.insertReportTableRow = insertReportTableRow;
+})();
   </script>
 
-  <script src="js/janitor-dashboard.js"></script>
-  <script src="js/scroll-progress.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      try {
-        const notifBtn = document.getElementById('notificationsBtn');
-        if (notifBtn) notifBtn.addEventListener('click', function(e){ e.preventDefault(); if (typeof openNotificationsModal === 'function') openNotificationsModal(e); else if (typeof showModalById === 'function') showModalById('notificationsModal'); });
-        const logoutBtn = document.getElementById('logoutBtn');
-        if (logoutBtn) logoutBtn.addEventListener('click', function(e){ e.preventDefault(); if (typeof showLogoutModal === 'function') showLogoutModal(e); else if (typeof showModalById === 'function') showModalById('logoutModal'); else window.location.href='logout.php'; });
-      } catch(err) { console.warn('Header fallback handlers error', err); }
-    });
-  </script>
-</body>
-</html> 
+  <script src="js/janitor-dashboard.js"></script>ry {
+  <script src="js/scroll-progress.js"></script>st notifBtn = document.getElementById('notificationsBtn');
+  <script> if (notifBtn) notifBtn.addEventListener('click', function(e){ e.preventDefault(); if (typeof openNotificationsModal === 'function') openNotificationsModal(e); else if (typeof showModalById === 'function') showModalById('notificationsModal'); });
+    document.addEventListener('DOMContentLoaded', function() { const logoutBtn = document.getElementById('logoutBtn');
+
+
+
+
+
+
+
+
+
+
+</html></body>

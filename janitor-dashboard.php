@@ -289,7 +289,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                            LEFT JOIN janitors j ON bins.assigned_to = j.janitor_id
                            WHERE bins.assigned_to = " . $conn->real_escape_string($janitorId) . "
                            ORDER BY
-                             CASE WHEN (bins.status = 'full' OR (bins.capacity IS NOT NULL AND bins.capacity >= 100)) THEN 0 ELSE 1 END,
+                             CASE WHEN (bins.status = 'full' OR (bins.capacity IS NOT NULL && bins.capacity >= 100)) THEN 0 ELSE 1 END,
                              bins.capacity DESC,
                              bins.created_at DESC
                            LIMIT 500";
@@ -371,7 +371,7 @@ try {
                        LEFT JOIN janitors j ON bins.assigned_to = j.janitor_id
                        WHERE bins.assigned_to = " . $conn->real_escape_string($janitorId) . "
                        ORDER BY
-                         CASE WHEN (bins.status = 'full' OR (bins.capacity IS NOT NULL AND bins.capacity >= 100)) THEN 0 ELSE 1 END,
+                         CASE WHEN (bins.status = 'full' OR (bins.capacity IS NOT NULL && bins.capacity >= 100)) THEN 0 ELSE 1 END,
                          bins.capacity DESC,
                          bins.created_at DESC
                        LIMIT 200";
@@ -953,6 +953,17 @@ try {
         .replaceAll("'", '&#039;');
     }
 
+    // helper to encode attribute values for data-attrs (used by loadAlerts)
+    function encodeAttr(s) {
+      if (s === null || s === undefined) return '';
+      return encodeURIComponent(String(s));
+    }
+
+    // expose current janitor id to client JS so ack posts include janitor_id
+    const JANITOR_ID = <?php echo intval($janitorId); ?>;
+    // expose current janitor display name for acknowledgement messages
+    const JANITOR_NAME = <?php echo json_encode($displayName ?? ($_SESSION['name'] ?? 'Janitor')); ?>;
+
     // Expose showSection so inline onclicks work (this was the reason you saw only '#' before)
     function showSection(name) {
       document.querySelectorAll('.content-section').forEach(s => s.style.display = 'none');
@@ -1149,13 +1160,20 @@ try {
           const title = a.title || 'Notification';
           const message = a.message || '';
           const target = a.bin_code || (a.bin_id ? ('Bin #' + a.bin_id) : '-');
+          const isRead = parseInt(a.is_read || 0, 10) === 1;
+
+          // action cell: show "Acknowledged" if already read; otherwise Acknowledge button
+          const actionHtml = isRead
+            ? '<span class="text-muted small">Acknowledged</span>'
+            : `<button class="btn btn-sm btn-success ack-btn" data-bin-id="${parseInt(a.bin_id||0,10)}" data-title="${encodeAttr(title)}" data-message="${encodeAttr(message)}">Acknowledge</button>`;
+
           tbody.insertAdjacentHTML('beforeend', `
             <tr>
               <td>${escapeHtml(time)}</td>
               <td>${escapeHtml(title)}</td>
               <td class="d-none d-md-table-cell"><small class="text-muted">${escapeHtml(message)}</small></td>
               <td class="d-none d-lg-table-cell">${escapeHtml(target)}</td>
-              <td class="text-end"><button class="btn btn-sm btn-primary" onclick="viewBinDetails(${parseInt(a.bin_id||0,10)})">Open</button></td>
+              <td class="text-end">${actionHtml}</td>
             </tr>
           `);
         });
@@ -1164,6 +1182,61 @@ try {
         document.getElementById('alertsBody').innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">Failed to load alerts</td></tr>';
       }
     }
+
+    // Acknowledge handler (delegated)
+    document.addEventListener('click', function(e) {
+      const btn = e.target.closest && e.target.closest('.ack-btn');
+      if (!btn) return;
+      e.preventDefault();
+      const binId = btn.getAttribute('data-bin-id') || '';
+      const origTitle = decodeURIComponent(btn.getAttribute('data-title') || '') || '';
+      // Friendly title & message for admin notifications
+      const title = origTitle ? `Acknowledged: ${origTitle}` : `Acknowledged alert${binId ? ' (Bin ' + binId + ')' : ''}`;
+      const message = origTitle
+        ? `${JANITOR_NAME} has acknowledged the alert about "${origTitle}".`
+        : `${JANITOR_NAME} has acknowledged an alert${binId ? ' for bin ' + binId : ''}.`;
+
+      btn.disabled = true;
+      btn.textContent = 'Acknowledging...';
+
+      const payload = new URLSearchParams();
+      payload.append('action', 'mark_read');
+      if (binId) payload.append('bin_id', binId);
+      if (JANITOR_ID) payload.append('janitor_id', JANITOR_ID);
+      payload.append('title', title);
+      payload.append('message', message);
+      payload.append('notification_type', 'acknowledgement');
+
+      fetch('notifications.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: payload.toString()
+      }).then(r => r.json()).then(data => {
+        if (data && data.success) {
+          const row = btn.closest('tr');
+          if (row) {
+            row.classList.add('table-light');
+            btn.remove();
+            const lastCell = row.querySelector('td.text-end');
+            if (lastCell && !lastCell.querySelector('.ack-label')) {
+              const span = document.createElement('span'); span.className = 'ack-label text-muted small'; span.textContent = 'Acknowledged';
+              lastCell.appendChild(span);
+            }
+          }
+          try { if (typeof showToast === 'function') showToast(data.message || 'Acknowledged', 'success'); else /* fallback */ console.log('Acknowledged'); } catch (e) {}
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Acknowledge';
+          alert((data && data.message) ? data.message : 'Failed to acknowledge alert');
+        }
+      }).catch(err => {
+        console.warn('Acknowledge error', err);
+        btn.disabled = false;
+        btn.textContent = 'Acknowledge';
+        alert('Server error while acknowledging alert');
+      });
+    });
 
     // -------------------------------------
     // Profile loader & save
@@ -1424,7 +1497,7 @@ try {
             if (curStatus === 'in_progress') curStatus = 'half_full';
             document.getElementById('updateBinId').value = bin.bin_id || binId;
             document.getElementById('updateBinIdDisplay').textContent = bin.bin_code || ('Bin ' + bin.bin_id);
-            document.getElementById('updateBinLocation').textContent = bin.location || 'N/A';
+            document.getElementById('updateBinLocation').textContent = bin.location || ' N/A';
             document.getElementById('updateNewStatus').value = curStatus;
           }
           document.getElementById('updateActionType').value = '';

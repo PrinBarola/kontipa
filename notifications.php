@@ -1,9 +1,17 @@
 <?php
 require_once 'includes/config.php';
 
-if (!isLoggedIn() || !isAdmin()) {
-    header('Location: admin-login.php');
-    exit;
+// replace original access check to allow logged-in janitors to POST AJAX actions
+if (!isLoggedIn()) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    } else {
+        header('Location: admin-login.php');
+        exit;
+    }
 }
 
 // helper to escape output
@@ -64,7 +72,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $title = trim($_POST['title'] ?? '');
             $message = trim($_POST['message'] ?? '');
             $notification_type = $_POST['notification_type'] ?? 'info';
-            $creatorAdminId = getCurrentUserId() ?: null;
+
+            // Use current user context:
+            $currentUserId = function_exists('getCurrentUserId') ? getCurrentUserId() : null;
+            // If the caller is a janitor, ensure janitor_id is set and admin_id remains NULL
+            if (function_exists('isJanitor') && isJanitor()) {
+                if (empty($janitor_id) && $currentUserId) $janitor_id = (int)$currentUserId;
+                $creatorAdminId = null;
+            } else {
+                // default: treat current user as admin creator (if available)
+                $creatorAdminId = $currentUserId ?: null;
+            }
 
             if (empty($title) && empty($message) && !$bin_id && !$janitor_id) {
                 throw new Exception('Missing data to create notification');
@@ -93,6 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
                 ");
                 if (!$stmt) throw new Exception($conn->error);
+                // bind parameters: admin may be null for janitor-originated inserts
                 $adminParam = $creatorAdminId !== null ? (int)$creatorAdminId : null;
                 $janitorParam = $janitor_id !== null ? (int)$janitor_id : null;
                 $binParam = $bin_id !== null ? (int)$bin_id : null;

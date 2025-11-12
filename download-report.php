@@ -1,81 +1,97 @@
 <?php
 require_once 'includes/config.php';
 
-if (!isLoggedIn() || !isAdmin()) {
-    header('HTTP/1.1 403 Forbidden');
-    exit('Forbidden');
+// Only allow logged-in users to download reports (admins and janitors)
+if (!isLoggedIn()) {
+    header($_SERVER['SERVER_PROTOCOL'] . ' 401 Unauthorized', true, 401);
+    echo "Unauthorized";
+    exit;
 }
 
-$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-if ($id <= 0) {
-    http_response_code(400);
-    exit('Invalid report id');
+$reportId = isset($_GET['id']) ? intval($_GET['id']) : 0;
+if ($reportId <= 0) {
+    header($_SERVER['SERVER_PROTOCOL'] . ' 400 Bad Request', true, 400);
+    echo "Missing or invalid report id";
+    exit;
 }
 
 try {
-    $stmt = $pdo->prepare("SELECT report_id, report_name, file_path, format, status FROM reports WHERE report_id = ? LIMIT 1");
-    $stmt->execute([$id]);
-    $report = $stmt->fetch(PDO::FETCH_ASSOC);
-} catch (Exception $e) {
-    error_log("[download-report.php] DB error: " . $e->getMessage());
-    $report = false;
-}
-
-if (!$report) {
-    http_response_code(404);
-    exit('Report not found');
-}
-
-// Only allow download if report completed (sa iyong requirement)
-if (strtolower($report['status'] ?? '') !== 'completed') {
-    http_response_code(403);
-    exit('Report not ready for download');
-}
-
-$filePath = $report['file_path'] ?? null;
-if (!$filePath) {
-    http_response_code(404);
-    exit('No file available for this report');
-}
-
-// Prevent path traversal: create absolute path and ensure it is within project directory
-$baseDir = realpath(__DIR__); // project root adjust if needed
-$absPath = realpath($baseDir . '/' . ltrim($filePath, '/\\'));
-
-if ($absPath === false || strpos($absPath, $baseDir) !== 0) {
-    error_log("[download-report.php] Invalid file path for report {$id}: {$filePath}");
-    http_response_code(403);
-    exit('Invalid file path');
-}
-
-if (!is_file($absPath) || !is_readable($absPath)) {
-    http_response_code(404);
-    exit('File not found');
-}
-
-// Determine filename to send
-$filename = basename($absPath);
-
-// Content-Type guess
-$mime = mime_content_type($absPath) ?: 'application/octet-stream';
-
-// Force download headers
-header('Content-Description: File Transfer');
-header('Content-Type: ' . $mime);
-header('Content-Disposition: attachment; filename="' . rawurlencode($filename) . '"');
-header('Content-Transfer-Encoding: binary');
-header('Expires: 0');
-header('Cache-Control: must-revalidate');
-header('Pragma: public');
-header('Content-Length: ' . filesize($absPath));
-
-flush();
-$fp = fopen($absPath, 'rb');
-if ($fp) {
-    while (!feof($fp)) {
-        echo fread($fp, 8192);
-        flush();
+    // Locate report row (PDO preferred)
+    $fileRel = null;
+    if (isset($pdo) && $pdo instanceof PDO) {
+        $stmt = $pdo->prepare("SELECT file_path, report_name FROM reports WHERE report_id = ? LIMIT 1");
+        $stmt->execute([$reportId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $fileRel = $row['file_path'] ?? null;
+            $reportName = $row['report_name'] ?? ("report_{$reportId}");
+        }
+    } else {
+        $res = $conn->query("SELECT file_path, report_name FROM reports WHERE report_id = " . intval($reportId) . " LIMIT 1");
+        if ($res && $r = $res->fetch_assoc()) {
+            $fileRel = $r['file_path'] ?? null;
+            $reportName = $r['report_name'] ?? ("report_{$reportId}");
+        }
     }
-    fclose($fp);
+
+    if (empty($fileRel)) {
+        header($_SERVER['SERVER_PROTOCOL'] . ' 404 Not Found', true, 404);
+        echo "Report file not found";
+        exit;
+    }
+
+    // Normalize path: stored file_path may be relative; ensure inside generated/reports
+    $baseDir = realpath(__DIR__ . '/generated/reports');
+    if ($baseDir === false) {
+        header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
+        echo "Server misconfiguration: reports directory missing";
+        exit;
+    }
+
+    // Calculate absolute path
+    $candidate = realpath(__DIR__ . '/' . ltrim($fileRel, '/\\'));
+    if ($candidate === false || strpos($candidate, $baseDir) !== 0) {
+        // not found or outside allowed folder
+        header($_SERVER['SERVER_PROTOCOL'] . ' 404 Not Found', true, 404);
+        echo "Report file not available";
+        exit;
+    }
+
+    if (!is_file($candidate) || !is_readable($candidate)) {
+        header($_SERVER['SERVER_PROTOCOL'] . ' 404 Not Found', true, 404);
+        echo "Report file missing";
+        exit;
+    }
+
+    // Determine filename for download
+    $ext = pathinfo($candidate, PATHINFO_EXTENSION);
+    $safeName = preg_replace('/[^A-Za-z0-9_\-\. ]+/', '_', ($reportName ?: "report_{$reportId}"));
+    if (strtolower($ext) !== 'csv' && strtolower($ext) !== 'txt') {
+        // force csv extension for Excel compatibility
+        $downloadFilename = $safeName . '.csv';
+    } else {
+        $downloadFilename = $safeName . '.' . $ext;
+    }
+
+    // Send headers and stream file
+    // Use CSV content type for .csv, otherwise generic binary
+    $mime = 'application/octet-stream';
+    if (strtolower($ext) === 'csv') $mime = 'text/csv; charset=UTF-8';
+    header('Content-Description: File Transfer');
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: attachment; filename="' . basename($downloadFilename) . '"');
+    header('Content-Transfer-Encoding: binary');
+    header('Expires: 0');
+    header('Cache-Control: must-revalidate');
+    header('Pragma: public');
+    header('Content-Length: ' . filesize($candidate));
+    // flush output buffers
+    while (ob_get_level()) ob_end_clean();
+    readfile($candidate);
+    exit;
+} catch (Exception $e) {
+    header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
+    error_log("[download-report] " . $e->getMessage());
+    echo "Server error";
+    exit;
 }
-exit;
